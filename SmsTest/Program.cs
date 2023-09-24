@@ -1,17 +1,29 @@
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 using SmsTest;
+using System.Net.Http.Headers;
+using System.Text;
 using Twilio;
 using Twilio.Rest.Api.V2010.Account;
 using Twilio.Types;
 using Vonage;
+using Vonage.Messages.Sms;
 using Vonage.Messaging;
 using Vonage.Request;
 using Vonage.Verify;
 
-var accountSid = "AC280aa864dda71af9658694efdbc13f99";
-var authToken = "763fa2f973eba2cd44f5ab22c72ea687";
 
-TwilioClient.Init(accountSid, authToken);
+
+var apiKey = "89bd2c7b";
+var apiSecret = "4lu7b5VmZNVUus22";
+
+var vonageClient = new VonageClient(new Vonage.ApiRequest
+{
+    ApiKey = apiKey,
+    ApiSecret = apiSecret
+});
+
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -41,6 +53,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+Dictionary<string, (string code, DateTime expiration)> verificationCodes = new Dictionary<string, (string, DateTime)>();
 
 app.MapPost("/send-verification-code", async (HttpContext context, [FromBody] Vonage.Verify.VerifyRequest verifyRequest) =>
 {
@@ -50,7 +63,7 @@ app.MapPost("/send-verification-code", async (HttpContext context, [FromBody] Vo
     var vonageClient = new VonageClient(new Credentials(apiKey, apiSecret));
 
     // Generate a random verification code (you can implement your own logic)
-    var verificationCode="hello";
+    var verificationCode = GenerateRandomCode(); // Implement this function
 
     // Send the verification code via SMS
     var response = vonageClient.SmsClient.SendAnSms(new Vonage.Messaging.SendSmsRequest
@@ -60,7 +73,9 @@ app.MapPost("/send-verification-code", async (HttpContext context, [FromBody] Vo
         Text = $"Your verification code is: {verificationCode}"
     });
 
-    // You can store the verification code and its expiration for future validation
+    // Store the verification code and its expiration time
+    var expiration = DateTime.UtcNow.AddMinutes(15); // Set an expiration time (e.g., 15 minutes)
+    verificationCodes["94701871526"] = (verificationCode, expiration);
 
     // Return a response
     if (response.Messages[0].Status == "0")
@@ -73,9 +88,35 @@ app.MapPost("/send-verification-code", async (HttpContext context, [FromBody] Vo
     }
 });
 
+app.MapPost("/verify-code", async (HttpContext context, [FromBody] VerifyCodeRequest codeRequest) =>
+{
+    if (verificationCodes.TryGetValue(codeRequest.PhoneNumber, out var storedCode))
+    {
+        if (DateTime.UtcNow <= storedCode.expiration && codeRequest.Code == storedCode.code)
+        {
+            // Code is valid and within the expiration time
+            await context.Response.WriteAsync("Verification code is valid.");
+        }
+        else
+        {
+            await context.Response.WriteAsync("Invalid verification code.");
+        }
+    }
+    else
+    {
+        await context.Response.WriteAsync("Verification code not found.");
+    }
+});
 
 
 
 
 app.Run();
+
+string GenerateRandomCode()
+{
+    Random random = new Random();
+    const string chars = "0123456789";
+    return new string(Enumerable.Repeat(chars, 6).Select(s => s[random.Next(s.Length)]).ToArray());
+}
 
